@@ -73,3 +73,5 @@ uWSGI==2.0.17.1
 python-memcached==1.59
 
 pyproj==1.9.5
+
+django-extensions==2.1.3

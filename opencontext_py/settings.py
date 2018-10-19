@@ -203,6 +203,7 @@ INSTALLED_APPS = (
     'django.contrib.staticfiles',
     'debug_toolbar',
     'django_user_agents',
+    'django_extensions',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -615,19 +616,30 @@ LOGGING_DIR = BASE_DIR + '/logs/'
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+       'brief': {
+         'format': '%(asctime)s %(levelname)s %(name)s[%(funcName)s]: %(message)s',
+         },
+       },
     'handlers': {
         'file': {
             'level': 'DEBUG',
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': os.path.join(LOGGING_DIR, 'error.log'),
             'maxBytes': 1024*1024*15,  # 15MB
-            'backupCount': 10
+            'backupCount': 10,
+            'formatter': 'brief'
             }
         },
     'loggers': {
         'opencontext_py.apps.indexer.crawler': {
             'handlers': ['file'],
             'level': 'DEBUG'
-            }
+            },
+        'opencontext_py': {
+            'handlers': ['file'],
+            'level': 'DEBUG',
+            'propagate': True,
+            },
         }
     }

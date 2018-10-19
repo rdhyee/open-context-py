@@ -22,6 +22,8 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.cache import cache_page
 from django.utils.cache import patch_vary_headers
 
+import logging
+
 
 def index(request, spatial_context=None):
     request = RequestNegotiation().anonymize_request(request)
@@ -748,12 +750,18 @@ def media_json_view(request, spatial_context=None):
                                      {'error': 'Solr Connection Problem'})
             return HttpResponse(template.render(context), status=503)
 
-
-# @cache_control(no_cache=True)
+@never_cache
+@cache_control(no_cache=True)
 @cache_page(settings.FILE_CACHE_TIMEOUT, cache='file')
 def projects_html_view(request, spatial_context=None):
     """ returns HTML representation of projects search
     """
+
+    logger = logging.getLogger(__name__)
+    logger.debug('hello from projects_html_view')
+
+    #assert False
+
     request = RequestNegotiation().anonymize_request(request)
     item_type_limited = True
     
