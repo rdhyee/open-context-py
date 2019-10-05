@@ -1,6 +1,5 @@
 import pytest
 import logging
-from opencontext_py.apps.searcher.new_solrsearcher import configs
 from opencontext_py.apps.searcher.new_solrsearcher.sorting import SortingOptions
 
 logger = logging.getLogger("tests-unit-logger")
@@ -11,9 +10,9 @@ TESTS_REQUEST_TO_SOLR = [
     #
     # (request_dict, sort value for solr),
     #
-    ({}, configs.SOLR_SORT_DEFAULT,),
-    ({'sort':[]}, configs.SOLR_SORT_DEFAULT,),
-    ({'sort':False}, configs.SOLR_SORT_DEFAULT,),
+    ({}, SortingOptions.DEFAULT_SOLR_SORT,),
+    ({'sort':[]}, SortingOptions.DEFAULT_SOLR_SORT,),
+    ({'sort':False}, SortingOptions.DEFAULT_SOLR_SORT,),
     
     # Test cases on interest score sorting
     ({'sort':'interest'}, 'interest_score asc, sort_score asc, slug_type_uri_label asc',),
@@ -30,15 +29,14 @@ TESTS_REQUEST_TO_SOLR = [
     ({'sort': 'item--asc---interest--desc'}, 'slug_type_uri_label asc, interest_score desc',),
     ({'sort': 'published'}, 'published asc, sort_score asc, slug_type_uri_label asc',),
     ({'sort': 'published--desc'}, 'published desc, sort_score asc, slug_type_uri_label asc',),
-    ({'sort': 'published--desc', 'foo': 'bar'}, 'published desc, sort_score asc, slug_type_uri_label asc',),
 ]
 
 
 def test_make_solr_sort_param_from_request_dict():
     """Tests translation of client request to sorting for solr query."""
     sort_opts = SortingOptions()
-    for request_dict, expected_solr_sort in TESTS_REQUEST_TO_SOLR:
-        solr_sort = sort_opts.make_solr_sort_param_from_request_dict(
-            request_dict
+    for input_request_dict, output_expected_solr in TESTS_REQUEST_TO_SOLR:
+        output = sort_opts.make_solr_sort_param_from_request_dict(
+            input_request_dict
         )
-        assert solr_sort == expected_solr_sort
+        assert output == output_expected_solr
