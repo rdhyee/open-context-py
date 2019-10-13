@@ -301,7 +301,7 @@ class Containment():
         # uuid.
         self.get_parents_by_child_uuid(ent.uuid, False)
         if not self.contexts_list:
-            print('Find a parent for: ' + ent.uuid)
+            print('Cannot dereference parent_uuid: ' + parent_uuid)
             return output
         parent_uuid = self.contexts_list[0]
         # Clear class so we can use this again.
