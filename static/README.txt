@@ -1,3 +1,5 @@
+static/README.txt
+
 README:
 
 Put the Bootstrap CSS and Javascript into a directory called "bootstrap/3.3.4"

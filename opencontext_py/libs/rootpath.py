@@ -15,7 +15,8 @@ class RootPath():
         """
         if settings.CANONICAL_HOST != settings.DEPLOYED_HOST:
             if settings.DEBUG:
-                base_url = 'http://127.0.0.1:8000'
+                #base_url = 'http://127.0.0.1:8000'
+                base_url = settings.DEPLOYED_HOST
             else:
                 base_url = settings.DEPLOYED_HOST
         else:

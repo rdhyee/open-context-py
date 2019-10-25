@@ -387,11 +387,14 @@ if DEBUG:
     ADMIN_MEDIA_PREFIX = '/static/admin/'
     STATIC_URL = '/static/'
     # STATIC_ROOT = BASE_DIR + '/static/'
-    STATIC_ROOT = BASE_DIR
+    #STATIC_ROOT = BASE_DIR
+    STATIC_ROOT = get_secret('STATIC_ROOT')
     STATICFILES_DIRS = (
-        os.path.join(BASE_DIR, 'static'),
+        STATIC_ROOT,
+        #os.path.join(BASE_DIR, 'static'),
         # '/static/',
     )
+    STATIC_ROOT = BASE_DIR
     # STATIC_EXPORTS_ROOT = STATIC_ROOT + '/exports/'
     # STATIC_IMPORTS_ROOT = STATIC_ROOT + '/imports/'
     STATIC_EXPORTS_ROOT = STATIC_ROOT + '/static/exports/'
