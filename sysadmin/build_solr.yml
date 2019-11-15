@@ -47,8 +47,8 @@
         file: extra.yml
       ignore_errors: yes
 
-    - name: log secret_key_4
-      debug: msg="{{secret_key_4}}"
+    # - name: log secret_key_4
+    #   debug: msg="{{secret_key_4}}"
 
     # - name: log oc_install_dir
     #   debug: msg="oc_install_dir {{oc_install_dir}}"
@@ -135,9 +135,9 @@
     # - name: install certbot dependencies
     #   command: apt-get install -y certbot python-certbot-nginx -t stretch-backports
 
-  # roles:
-  #     # https://github.com/geerlingguy/ansible-role-postgresql (alt: https://github.com/ANXS/postgresql)
-  #   - role: geerlingguy.postgresql
+  roles:
+      # https://github.com/geerlingguy/ansible-role-postgresql (alt: https://github.com/ANXS/postgresql)
+    # - role: geerlingguy.postgresql
 
     # # ansible-galaxy install git+https://github.com/rdhyee/ansible-python.git,dev
     # - role: ansible-python
@@ -211,10 +211,10 @@
     # - name: show groups for "{{user}}"
     #   debug: msg="{{groups_output}}"
 
-    # - name: clone the oc git repo into {{oc_install_dir}}
-    #   become: yes
-    #   become_user: "{{user}}"
-    #   git: repo={{oc_github_repo}} dest={{oc_install_dir}} accept_hostkey=True force=yes version="{{repo_branch | default('master')}}"
+    - name: clone the oc git repo into {{oc_install_dir}}
+      become: yes
+      become_user: "{{user}}"
+      git: repo={{oc_github_repo}} dest={{oc_install_dir}} accept_hostkey=True force=yes version="{{repo_branch | default('master')}}"
 
 
     # # use pipenv to install dependencies
