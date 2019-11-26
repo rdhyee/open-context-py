@@ -1,0 +1,240 @@
+- name: solr setup
+  hosts: '{{vname}}'
+  vars:
+    user: "{{ ansible_user }}"
+    user_owner: www-data
+    group_owner: www-data
+    target: '{{vname}}'
+    migrate: "{{do_migrate | default('true')}}"
+    install_db: "{{install_db | default('true')}}"
+    install_solr_data: "{{install_solr_data | default('true')}}"
+    install_root_cron: "{{install_root_cron | default('true')}}"
+
+    # calculate static_root
+    oc_static_root: "{{oc_install_dir}}/staticroot"
+
+    # postgres vars -- for LOCAL postgres installation
+    postgresql_python_library: python-psycopg2
+    postgresql_user: postgres
+    postgresql_group: postgres
+    postgresql_databases:
+      - name: "{{SECRET_KEYS.DATABASES_NAME}}"
+    postgresql_users:
+      - name: "{{SECRET_KEYS.DATABASES_USER}}"
+        password: "{{SECRET_KEYS.DATABASES_PASSWORD}}"
+
+    # git parameters
+    # expected to be overridden in extra.yml
+    git_user_name: ""
+    git_user_email: ""
+
+  become: yes
+
+  gather_facts: True
+  pre_tasks:
+
+    - name: Include vars of extra.yml
+      include_vars:
+        file: extra.yml
+      ignore_errors: yes
+
+    - name: Display all variables/facts known for a host
+      debug:
+        var: hostvars[inventory_hostname]
+      tags: debug_info
+
+    - name: Ensure group "www-data" exists
+      group:
+        name: www-data
+        state: present
+
+    - name: Ensure user "www-data" exists
+      user:
+        name: www-data
+        state: present
+
+    - name: add {{user}} to www-data group
+      user: name={{user}} groups=www-data append=yes
+
+      # https://stackoverflow.com/a/44753457/7782 -- to get the addition to take hold in script
+    - name: reset ssh connection to allow user changes to affect 'current login user'
+      meta: reset_connection
+
+    - setup: # aka gather_facts
+
+    - name: check apt last update
+      stat: path=/var/cache/apt
+      register: apt_cache_stat
+
+    - name: update apt if needed
+      apt: update_cache=yes
+      when: ansible_date_time.epoch|float - apt_cache_stat.stat.mtime > 60*60*12
+
+    - name: do apt-get update --fix-missing
+      command: apt-get update --fix-missing
+
+    - name: apt-get update
+      apt:
+        update_cache: yes
+
+    - name: Accept Java 8 License
+      debconf: name='oracle-java8-installer' question='shared/accepted-oracle-license-v1-1' value='true' vtype='select'
+
+    - name: installing dependencies
+      apt:
+        name: "{{ packages }}"
+        update_cache: yes
+      vars:
+        packages:
+        - git-core
+        - default-jdk
+        - make
+        - gcc
+        - nginx
+        - ufw
+        - unzip
+      tags: install
+
+  roles:
+
+    # # - role: williamyeh.oracle-java # https://github.com/William-Yeh/ansible-oracle-java instead of role: geerlingguy.java
+    - role: geerlingguy.solr
+
+  tasks:
+
+    - name: create {{oc_install_dir}}
+      file: path={{oc_install_dir}} state=directory owner={{user_owner}} group={{group_owner}} mode=02770
+    
+    - name: git config
+      command: "{{item}}"
+      with_items:
+        - git config --global user.name "{{git_user_name}}"
+        - git config --global user.email "{{git_user_email}}"
+ 
+    - name: ssh-keygen
+      command: ssh-keygen -b 2048 -t rsa -f /home/{{user}}/.ssh/id_rsa -P ""
+      become: no
+      args:
+        creates: /home/{{user}}/.ssh/id_rsa
+
+    - name: clone the oc git repo into {{oc_install_dir}}
+      become: yes
+      become_user: "{{user}}"
+      git: repo={{oc_github_repo}} dest={{oc_install_dir}} accept_hostkey=True force=yes version="{{repo_branch | default('master')}}"
+
+    # TO DO:  be more restrictive once we get this into production
+    - name: turn on ports
+      ufw: rule=allow port={{ item }} proto=tcp
+      with_items:
+      - 22
+      - 80
+      - 443
+      - 8000
+      - 8983
+
+    - name: enable ufw
+      ufw: state=enabled
+
+    - name: create "{{oc_install_dir}}/logs"
+      file: path="{{oc_install_dir}}/logs" state=directory owner={{user_owner}} group={{group_owner}} mode=02770
+
+    - name: create secrets.json from template
+      template: src=templates/secrets.json.j2 dest="{{oc_install_dir}}/secrets.json" owner={{user_owner}} group={{group_owner}} mode=0660
+
+    # sudo rm /etc/nginx/sites-enabled/default
+    - name: remove the default nginx sites 
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      become: yes
+
+    # solr configuration
+
+    # create core using /opt/solr/bin/solr with ? parameters
+    # TO DO: sudo -u solr bash -c "/opt/solr/bin/solr create_core -c open-context"
+    - name: create open-context core 
+      command: sudo -u solr bash -c "/opt/solr/bin/solr create_core -c open-context"
+
+    # if install_solr_data is true: we get the solr index dump
+    # otherwise: configure with 
+    # ../solr-config/Solr-7/solrconfig.xml --> /var/solr/data/open-context/conf/solrconfig.xml
+
+    - name: copy over solrconfig.xml
+      copy:
+        src: "../solr-config/Solr-7/solrconfig.xml"
+        dest: /var/solr/data/open-context/conf/solrconfig.xml
+        owner: solr
+        group: solr
+        mode: 0770
+      when: not install_solr_data
+
+    - name: copy over schema.xml
+      copy:
+        src: "../solr-config/Solr-7/schema.xml"
+        dest: /var/solr/data/open-context/conf/schema.xml
+        owner: solr
+        group: solr
+        mode: 0770
+      when: not install_solr_data
+
+    # download the solr backup 
+    - name: download solr backup 
+      get_url:
+        url: "{{GROUP_SECRETS.SOLR_BACKUP_URL}}"
+        dest: "/tmp/{{GROUP_SECRETS.SOLR_BACKUP}}"
+        mode: 0640
+        owner: solr
+        group: solr
+      when: install_solr_data
+
+    - name: create /tmp/solr_backup
+      file: path="/tmp/solr_backup" state=directory owner=solr group=solr mode=0770
+      become: yes
+      when: install_solr_data
+
+    # unarchive the solr zip file
+    - name: unzip solr zip file
+      unarchive:
+        src: "/tmp/{{GROUP_SECRETS.SOLR_BACKUP}}"
+        dest: /tmp/solr_backup
+        remote_src: true
+        owner: solr
+        group: solr
+      when: install_solr_data
+
+    # mv /tmp/solr_backup/oc-solr-6/server/solr/open-context/* /var/solr/data/open-context/
+
+    - name: stat solr backup data 
+      stat: path=/tmp/solr_backup/oc-solr-6/server/solr/open-context
+      register: oc_stat
+      become: yes
+      when: install_solr_data
+
+    # TO DO -- parameterize oc-solr-6
+    - name: Move solr backup to solr data directory
+      command: sudo -u solr bash -c "rm -rf /var/solr/data/open-context/; mv -f /tmp/solr_backup/oc-solr-6/server/solr/open-context /var/solr/data/"
+      # when: oc_stat.exists and install_solr_data
+      when: install_solr_data
+
+    # issue command to reload core
+    - name: issue command to reload core
+      command: curl "http://localhost:8983/solr/admin/cores?action=RELOAD&core=open-context&&wt=json"
+      when: install_solr_data
+
+    - name: Change file ownership for git repo
+      command: "chown -R {{user_owner}}:{{group_owner}} {{oc_install_dir}}"
+      changed_when: false
+
+    - name: set default group to www-data
+      command: "chmod -R g+sX {{oc_install_dir}}"
+      changed_when: false
+
+    - name: Change group permission to equal user permission
+      command: "chmod -R g=u {{oc_install_dir}}"
+      changed_when: false
+
+
+  handlers:
+    - name: restart nginx
+      service: name=nginx state=restarted
+      become: yes
