@@ -250,7 +250,7 @@ def solr_call(request_path, spatial_context=None, sdebug=None):
     squery = response.build_request(query)
 
     if sdebug is not None:
-        squery['debug'] = squery
+        squery['debug'] = sdebug
 
     url = urljoin(solr_s.solr.base_url, 'select')
     try:
