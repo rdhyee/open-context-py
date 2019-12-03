@@ -222,7 +222,7 @@ def test_custom_sql():
 
 # model: https://github.com/ekansa/open-context-py/blob/45317e3f236c8657657d5ade4764364becba4411/opencontext_py/apps/searcher/solrsearcher/models.py#
 
-def solr_call(request_path, spatial_context=None):
+def solr_call(request_path, spatial_context=None, sdebug=None):
 
 
     rf = RequestFactory()
@@ -248,6 +248,10 @@ def solr_call(request_path, spatial_context=None):
 
     response = KludgeSolrResponse()
     squery = response.build_request(query)
+
+    if sdebug is not None:
+        squery['debug'] = squery
+
     url = urljoin(solr_s.solr.base_url, 'select')
     try:
         http_response = solr_s.solr.make_request.post(url,
