@@ -263,6 +263,7 @@ def solr_call(request_path, spatial_context=None, sdebug=None):
     else:
         return {
           'response': response,
+          'qtime': response.raw_content['responseHeader']['QTime'],
           'squery': squery,
           'query': query,
           'url': url,
