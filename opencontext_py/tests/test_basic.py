@@ -261,6 +261,7 @@ def solr_call(request_path, spatial_context=None):
           'response': response,
           'squery': squery,
           'query': query,
-          'url': url
+          'url': url,
+          'solr_s': solr_s
         }
 
