@@ -262,6 +262,9 @@ def solr_call(request_path, spatial_context=None, sdebug=None):
         raise error
     else:
         return {
+          'request_path': request_path,
+          'request': request,
+          'request_dict': request_dict,
           'response': response,
           'qtime': response.raw_content['responseHeader']['QTime'],
           'squery': squery,
