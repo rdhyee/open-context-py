@@ -100,6 +100,8 @@
     # # - role: williamyeh.oracle-java # https://github.com/William-Yeh/ansible-oracle-java instead of role: geerlingguy.java
     - role: geerlingguy.solr
       solr_version: 7.7.2
+      solr_xms: "4G"
+      solr_xmx: "4G"
       solr_home: /var/solr
 
   tasks:
