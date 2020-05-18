@@ -24,6 +24,11 @@ site.addsitedir(os.path.join('/var/oc_venv',
 
 """
 
+# manual insertion of path -- a workaround for now
+
+sys.path.extend(['/var/oc-venv/.venv/lib/python3.7/site-packages',
+                 '/usr/local/lib/python3.7/site-packages'])
+
 from django.core.wsgi import get_wsgi_application
 
 os.environ['DJANGO_SETTINGS_MODULE'] = 'opencontext_py.settings'
