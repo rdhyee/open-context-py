@@ -57,8 +57,8 @@ if 'SOLR_HOST_TEST' in secrets:
 else:
     # Default to the normal solr connection
     SOLR_HOST_TEST = SOLR_HOST
-    SOLR_PORT_TEST = SOLR_PORT_TEST
-    SOLR_COLLECTION_TEST = SOLR_COLLECTION_TEST
+    SOLR_PORT_TEST = SOLR_PORT
+    SOLR_COLLECTION_TEST = SOLR_COLLECTION
 
 # SECURITY WARNING: don't run with debug turned on in production!
 if get_secret('DEBUG') == 1:
