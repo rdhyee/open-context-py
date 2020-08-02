@@ -47,6 +47,7 @@ class ProjectContext():
         self.pred_sql_dict_list = None
         self.most_recent_date = None
         self.refresh_cache = False
+        self.uuids_for_queries = None
         if uuid is not None:
             if uuid is False or uuid == '0' or uuid == 'open-context':
                 self.uuid = '0'
@@ -85,7 +86,7 @@ class ProjectContext():
             data annotations with database queries
         """
         if self.manifest is not False:
-            key = 'context-vocabs---' + self.manifest.project_uuid
+            key = 'context-vocabs---' + self.manifest.uuid
             fcache = FileCacheJSON()
             fcache.working_dir = 'contexts'
             if self.refresh_cache:
@@ -158,9 +159,11 @@ class ProjectContext():
         pred_sql_dict_list = self.get_working_project_predicates()
         la_preds = self.get_link_annotations_for_preds(pred_sql_dict_list)
         if not isinstance(pred_sql_dict_list, list):
-            # No predicates in the project. Wierd, but possible
+            # No predicates in the project. Weird, but possible
             return graph
-        annotated_pred_uuids = {la.subject:la for la in la_preds}
+        annotated_pred_uuids = {la.subject:[] for la in la_preds}
+        for la in la_preds:
+            annotated_pred_uuids[la.subject].append(la)
         for sql_dict in pred_sql_dict_list:
             act_pred = LastUpdatedOrderedDict()
             act_pred['@id'] = 'oc-pred:' + str(sql_dict['slug'])
@@ -173,10 +176,12 @@ class ProjectContext():
             act_pred['slug'] = sql_dict['slug']
             if isinstance(sql_dict['class_uri'], str) and len(sql_dict['class_uri']) > 0:
                 act_pred['oc-gen:predType'] = sql_dict['class_uri']
-            if sql_dict['predicate_uuid'] in annotated_pred_uuids:
-                # prefix common URIs for the predicate of the link annotation
-                la_pred = annotated_pred_uuids[sql_dict['predicate_uuid']]
-                la_pred_uri = URImanagement.prefix_common_uri(la_pred.predicate_uri)
+            
+            uuid_la_preds = annotated_pred_uuids.get(sql_dict['predicate_uuid'], [])
+            for la_pred in uuid_la_preds:
+                la_pred_uri = URImanagement.prefix_common_uri(
+                    la_pred.predicate_uri
+                )
                 act_pred = self.add_unique_object_dict_to_pred(
                     act_pred,
                     la_pred_uri,
@@ -196,6 +201,9 @@ class ProjectContext():
         output = None
         if self.manifest is not False and self.pred_sql_dict_list is None:
             # security protection
+            uuids = self.get_project_uuids()
+            uuids_for_sql = ', '.join(["'{}'".format(uuid) for uuid in uuids])
+            print('uuids_for_sql: {}'.format(uuids_for_sql))
             not_in_list = [
                 Assertion.PREDICATES_CONTAINS,
                 Assertion.PREDICATES_LINK,
@@ -214,9 +222,10 @@ class ProjectContext():
                      'p.data_type AS data_type, '
                      'm.revised AS updated '
                      'FROM oc_assertions AS ass '
+                     'JOIN oc_manifest AS mm ON mm.uuid = ass.uuid '
                      'LEFT JOIN oc_manifest AS m ON ass.predicate_uuid = m.uuid '
                      'LEFT JOIN oc_predicates AS p ON ass.predicate_uuid = p.uuid '
-                     'WHERE ass.project_uuid = (%s) AND ' + not_in_sql + ' '
+                     'WHERE mm.project_uuid IN (' + uuids_for_sql + ') AND ' + not_in_sql + ' '
                      'GROUP BY ass.predicate_uuid, '
                      'm.label, '
                      'm.slug, '
@@ -225,7 +234,7 @@ class ProjectContext():
                      'p.data_type '
                      'ORDER BY p.data_type, m.slug, m.class_uri; ')
             cursor = connection.cursor()
-            cursor.execute(query, [self.manifest.uuid])
+            cursor.execute(query, [])
             rows = self.dictfetchall(cursor)
             self.pred_sql_dict_list = rows
         # now get predicates from the Open Context general vocabulary, if applicable
@@ -299,29 +308,35 @@ class ProjectContext():
     
     def add_unique_object_dict_to_pred(self, subject_dict, predicate_uri, object_uri):
         """ adds a unique object dict for a given predicate_uri to a subject dict """
-        if isinstance(predicate_uri, str) and isinstance(object_uri, str):
-            if predicate_uri not in subject_dict:
-                subject_dict[predicate_uri] = []
+        if not isinstance(predicate_uri, str):
+            return subject_dict
+
+        if not isinstance(object_uri, str):
+            return subject_dict
+        
+        if predicate_uri not in subject_dict:
+            subject_dict[predicate_uri] = []
+
+        if isinstance(subject_dict[predicate_uri], str):
+            # we need this as a list!
+            subject_dict[predicate_uri] = [subject_dict[predicate_uri]]
+        
+        add_object_uri = True
+        for old_object in subject_dict[predicate_uri]:
+            if 'id' in old_object:
+                old_obj_uri = old_object['id']
+            elif '@id' in old_object:
+                old_obj_uri = old_object['@id']
             else:
-                if isinstance(subject_dict[predicate_uri], str):
-                    # we need this as a list!
-                    subject_dict[predicate_uri] = [subject_dict[predicate_uri]]
-            add_object_uri = True
-            for old_object in subject_dict[predicate_uri]:
-                if 'id' in old_object:
-                    old_obj_uri = old_object['id']
-                elif '@id' in old_object:
-                    old_obj_uri = old_object['@id']
-                else:
-                    old_obj_uri = None
-                if old_obj_uri == object_uri:
-                    # we already have the same object_uri for this predicate_uri
-                    # so do not add the object_uri again
-                    add_object_uri = False
-                    break
-            if add_object_uri:
-                object_item = self.make_object_dict_item(object_uri)
-                subject_dict[predicate_uri].append(object_item)
+                old_obj_uri = None
+            if old_obj_uri == object_uri:
+                # we already have the same object_uri for this predicate_uri
+                # so do not add the object_uri again
+                add_object_uri = False
+                break
+        if add_object_uri:
+            object_item = self.make_object_dict_item(object_uri)
+            subject_dict[predicate_uri].append(object_item)
         return subject_dict
 
     def get_working_project_types(self):
@@ -334,6 +349,8 @@ class ProjectContext():
         """
         output = None
         if self.manifest is not False:
+            uuids = self.get_project_uuids()
+            uuids_for_sql = ', '.join(["'{}'".format(uuid) for uuid in uuids])
             query = ('SELECT la.subject AS type_uuid, '
                      'la.predicate_uri AS predicate_uri, '
                      'la.object_uri AS object_uri, '
@@ -343,7 +360,8 @@ class ProjectContext():
                      'LEFT JOIN oc_manifest AS m ON la.subject = m.uuid '
                      'JOIN oc_assertions AS ass '
                      'ON ( la.subject = ass.object_uuid ) '
-                     'WHERE la.subject_type = \'types\' AND ass.project_uuid = (%s) '
+                     'JOIN oc_manifest AS mm ON mm.uuid = ass.uuid '
+                     'WHERE la.subject_type = \'types\' AND mm.project_uuid IN (' + uuids_for_sql + ') '
                      'GROUP BY la.subject, '
                      'la.predicate_uri, '
                      'la.object_uri, '
@@ -351,7 +369,7 @@ class ProjectContext():
                      'm.slug '
                      'ORDER BY la.object_uri; ')
             cursor = connection.cursor()
-            cursor.execute(query, [self.manifest.uuid])
+            cursor.execute(query, [])
             rows = self.dictfetchall(cursor)
             output = rows
         return output
@@ -377,6 +395,28 @@ class ProjectContext():
             item['label'] = ent.label
             item['slug'] = ent.slug
         return item
+
+    def get_project_uuids(self):
+        """Gets the uuids related to predicates and types"""
+        
+        if self.uuids_for_queries is not None:
+            return self.uuids_for_queries
+
+        uuids = [
+            self.uuid,
+        ]
+        if self.manifest:
+            uuids += [
+                self.manifest.uuid,
+                self.manifest.project_uuid,
+            ]
+        if self.project_obj:
+            uuids += [
+                self.project_obj.uuid,
+                self.project_obj.project_uuid,
+            ]
+        self.uuids_for_queries = list(set(uuids))
+        return self.uuids_for_queries
 
     def dereference_uuid_or_slug(self, uuid_or_slug):
         """ dereferences the uuid to make sure it is a project """

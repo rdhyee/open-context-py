@@ -9,6 +9,7 @@ from opencontext_py.libs.languages import Languages
 from opencontext_py.libs.isoyears import ISOyears
 from opencontext_py.libs.general import LastUpdatedOrderedDict, DCterms
 from opencontext_py.apps.entities.uri.models import URImanagement
+from opencontext_py.apps.ocitems.ocitem.biotaxa import biological_taxonomy_validation
 from opencontext_py.apps.ocitems.ocitem.itemkeys import ItemKeys
 from opencontext_py.apps.ocitems.ocitem.caching import ItemGenerationCache
 from opencontext_py.apps.ocitems.ocitem.partsjsonld import PartsJsonLD
@@ -418,10 +419,12 @@ class ItemAttributes():
         adds linked data annotations (typically referencing URIs from
         outside Open Context)
         """
-        if not self.link_annotations or not len(self.link_annotations):
-            # No link annotations, so skip out.
+        if not self.link_annotations:
             return json_ld
-        # We have link annotations.
+        
+        if not len(self.link_annotations):
+            return json_ld
+            
         parts_json_ld = PartsJsonLD()
         parts_json_ld.proj_context_json_ld = self.proj_context_json_ld
         parts_json_ld.manifest_obj_dict = self.manifest_obj_dict
@@ -441,10 +444,17 @@ class ItemAttributes():
             # to make a compact URI (prefixed), as the act_pred
             act_pred = URImanagement.prefix_common_uri(la.predicate_uri)
             if act_pred not in self.dc_author_preds \
-               and act_pred not in self.dc_inherit_preds \
-               and act_pred not in self.dc_metadata_preds:
-                # the act_prec is not a dublin core predicate, so we're OK to add it
+                and act_pred not in self.dc_inherit_preds \
+                and act_pred not in self.dc_metadata_preds:
+                # the act_pred is not a dublin core predicate, so we're OK to add it
                 # now, not later.
+
+                if not biological_taxonomy_validation(
+                    act_pred, la.object_uri):
+                    # We have a act_pred and object_uri combination
+                    # that is not valid. So skip.
+                    continue
+
                 json_ld = parts_json_ld.addto_predicate_list(
                     json_ld,
                     act_pred,

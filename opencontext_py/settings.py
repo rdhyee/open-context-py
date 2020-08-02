@@ -49,6 +49,17 @@ SOLR_HOST = get_secret('SOLR_HOST')
 SOLR_PORT = get_secret('SOLR_PORT')
 SOLR_COLLECTION = get_secret('SOLR_COLLECTION')
 
+# Testing (for new indices) solr connection
+if 'SOLR_HOST_TEST' in secrets:
+    SOLR_HOST_TEST = get_secret('SOLR_HOST_TEST')
+    SOLR_PORT_TEST = get_secret('SOLR_PORT_TEST')
+    SOLR_COLLECTION_TEST = get_secret('SOLR_COLLECTION_TEST')
+else:
+    # Default to the normal solr connection
+    SOLR_HOST_TEST = SOLR_HOST
+    SOLR_PORT_TEST = SOLR_PORT_TEST
+    SOLR_COLLECTION_TEST = SOLR_COLLECTION_TEST
+
 # SECURITY WARNING: don't run with debug turned on in production!
 if get_secret('DEBUG') == 1:
     DEBUG = True
@@ -131,6 +142,12 @@ if 'SECURE_SSL_REDIRECT' in secrets:
         DEFAULT_HTTPS = True
 
 
+# Merritt (CDL repository) seems to do strange HTTP redirects which
+# break browser display of images. This setting toggles proxying of
+# these image files. A crude solution that seems to lead to too many
+# 500 errors.
+MERRITT_IMAGE_PROXY = False
+
 # EZID Authentication and configuration
 # This is used to interact with the EZID service
 # to make and manage persistent identifiers
@@ -174,8 +191,9 @@ INSTALLED_APPS = (
     'opencontext_py.apps.ocitems.ocitem',
     'opencontext_py.apps.ocitems.manifest',
     
-    # Save this for later.
-    # 'opencontext_py.apps.ocitems.newmanifest',
+    # Save this for later. This is for experimental
+    # work refactoring the postgres schema
+    # 'opencontext_py.apps.all_items',
     
     'opencontext_py.apps.ocitems.assertions',
     'opencontext_py.apps.ocitems.events',
@@ -380,6 +398,12 @@ USE_TZ = True
 # ----------------------------
 IMPORT_BATCH_SIZE = 500  # number of records to import in 1 batch
 
+# Use the normal dict get method, because we don't need to throw
+# an error if this secret does not exist.
+REFINE_URL = secrets.get(
+    'REFINE_URL', 
+    'http://127.0.0.1:3333', # The default.
+)
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/1.6/howto/static-files/

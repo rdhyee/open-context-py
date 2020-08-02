@@ -1,14 +1,19 @@
 import copy
 import datetime
 import itertools
+import math
 import re
 
 from opencontext_py.libs.general import LastUpdatedOrderedDict
+from opencontext_py.apps.entities.uri.models import URImanagement
 
 from opencontext_py.apps.indexer.solrdocumentnew import (
+    SOLR_DATA_TYPE_TO_PREDICATE,
     get_solr_predicate_type_string,
     SolrDocumentNew as SolrDocument,
 )
+
+from opencontext_py.apps.searcher.new_solrsearcher import configs
 
 # ---------------------------------------------------------------------
 # This module contains general utility functions for the solr search
@@ -18,6 +23,111 @@ from opencontext_py.apps.indexer.solrdocumentnew import (
 # functions will be independent of all DB interactions, so they can be
 # tested with unit testing.
 # ---------------------------------------------------------------------
+def make_suffix_no_suffix_list(raw_term, suffix="/"):
+    """Makes list where a string does and does not end with a suffix"""
+    if not isinstance(raw_term, str):
+        return None
+    terms = [raw_term]
+    if not suffix:
+        return terms
+    if raw_term.endswith(suffix):
+        terms.append(raw_term[:-len(suffix)])
+    else:
+        terms.append((raw_term + suffix))
+    return terms
+
+def make_alternative_prefix_list(raw_term, alt_prefixes=('http://', 'https://',)):
+    """Makes list where a string does and does not end with a suffix"""
+    if not isinstance(raw_term, str):
+        return None
+    if (not raw_term.startswith('http://') 
+        and not raw_term.startswith('https://')
+        and ':' in raw_term):
+        full_uri = URImanagement.convert_prefix_to_full_uri(raw_term)
+        if full_uri:
+            raw_term = full_uri
+    alt_term = None
+    if raw_term.startswith(alt_prefixes[0]):
+        alt_term = alt_prefixes[1] + raw_term[len(alt_prefixes[0]):]
+    elif raw_term.startswith(alt_prefixes[1]):
+        alt_term = alt_prefixes[0] + raw_term[len(alt_prefixes[1]):]
+    if not alt_term:
+        return None
+    return [raw_term, alt_term]
+
+def make_uri_equivalence_list(raw_term, alt_suffix="/"):
+    """ Makes Prefixed, HTTP, HTTPS and '/' ending options list for URLs
+    """
+    # NOTE: Open Context often references Web URL/URIs to "linked data"
+    # entities. Open Context considers http:// and https:// URLs to be
+    # equivalent. This function takes a raw term and makes http://
+    # https:// variants. It also makes a prefixed URL if a namespace
+    # is recognized in URImanagement. Finally, it will by default, 
+    # make variants that have and do not have a trailing "/".
+
+    output_list = []
+    if not isinstance(raw_term, str):
+        return None
+    output_list.append(raw_term)
+    url_terms = []
+    if raw_term.startswith('http://') or raw_term.startswith('https://'):
+        # NOTE: The raw_term looks like a Web URL. We need to make
+        # variants that start with http, https, and end in a slash, and
+        # do not end in a slash.
+        url_terms = make_suffix_no_suffix_list(raw_term, suffix=alt_suffix)
+    elif raw_term.count(':') == 1:
+        full_uri = URImanagement.convert_prefix_to_full_uri(raw_term)
+        if full_uri:
+            url_terms = make_suffix_no_suffix_list(full_uri, suffix=alt_suffix)
+        url_terms.append(raw_term)
+
+    for term in url_terms:
+        http_alts = make_alternative_prefix_list(
+            term, 
+            alt_prefixes=('http://', 'https://',)
+        )
+        if not http_alts:
+            continue
+        for http_alt in http_alts:
+            if http_alt not in output_list:
+                output_list.append(http_alt)
+            prefix_id = URImanagement.prefix_common_uri(http_alt)
+            if alt_suffix and prefix_id.endswith(alt_suffix):
+                # Remove any trailing slash with prefixed IDs.
+                prefix_id = prefix_id[:-len(alt_suffix)]
+            if prefix_id and prefix_id not in output_list:
+                output_list.append(prefix_id)
+    return output_list
+
+
+def get_item_type_dict(raw_type_key):
+    """Gets an item_type dictionary object from a raw_type key"""
+    if not isinstance(raw_type_key, str):
+        return None
+    type_dict = configs.ITEM_TYPE_MAPPINGS.get(
+        raw_type_key
+    )
+    if type_dict is not None:
+        # The simplest, happiest scenario
+        return type_dict
+
+    type_keys = make_uri_equivalence_list(raw_type_key)
+    look_up_types = {
+        # Add to the lookup keyed by slug
+        type_dict['slug']: type_dict 
+        for key, type_dict in configs.ITEM_TYPE_MAPPINGS.items()
+    }
+    for _, type_dict in configs.ITEM_TYPE_MAPPINGS.items():
+        # Now add to the lookup keyed by the isDefinedBy value
+        look_up_types[type_dict['rdfs:isDefinedBy']] = type_dict
+    
+    for type_key in make_uri_equivalence_list(raw_type_key):
+        type_dict = look_up_types.get(type_key)
+        if type_dict is not None:
+            # We found it!
+            return type_dict
+    # We did not find a match for this key or any variant of it.
+    return None
 
 
 def infer_multiple_or_hierarchy_paths(
@@ -41,15 +151,21 @@ def infer_multiple_or_hierarchy_paths(
     :param str or_delim: The OR operator / delimiter.
     '''
     # First, cleanup dangling delimeters at the start or end.
-    for delim in [hierarchy_delim, or_delim]:
+    check_delims = [or_delim]
+    if hierarchy_delim:
+        check_delims.append(hierarchy_delim)
+    for delim in check_delims:
         raw_path = raw_path.lstrip(delim)
         raw_path = raw_path.rstrip(delim)
     # Split the raw_path by hiearchy delim (default to '/') and then by
     # the or_delim (default to '||').
-    path_lists = [
-        path_parts.split(or_delim)
-        for path_parts in raw_path.split(hierarchy_delim)
-    ]
+    if hierarchy_delim:
+        path_lists = [
+            path_parts.split(or_delim)
+            for path_parts in raw_path.split(hierarchy_delim)
+        ]
+    else:
+        path_lists = [raw_path.split(or_delim)]
     # Create a list of the various permutations
     path_tuple_list = list(itertools.product(*path_lists))
     
@@ -57,6 +173,8 @@ def infer_multiple_or_hierarchy_paths(
     # paths and paths-as-lists.
     paths_as_strs = []
     paths_as_lists = []
+    if not hierarchy_delim:
+        hierarchy_delim = ''
     for path_parts in path_tuple_list:
         if not len(path_parts):
             continue
@@ -73,7 +191,6 @@ def infer_multiple_or_hierarchy_paths(
     return paths_as_strs
 
 
-
 def get_path_depth(self, path, delimiter='/'):
     """Gets the depth of a (number of items) if split by a delimiter
     
@@ -85,6 +202,54 @@ def get_path_depth(self, path, delimiter='/'):
     # Remove a possible trailing delimiter before calculating
     # the depth
     return len(path.rstrip(delimiter).split(delimiter))
+
+
+def rename_solr_field_for_data_type(data_type, solr_field):
+    """Renames a solr field to match its data type.
+
+    :param str data_type: The JSON-LD document data type
+        for the solr field.
+    :param str solr_field: The solr field that will changed
+        appropriate to its datatype.
+    """
+    if not SolrDocument.SOLR_VALUE_DELIM in solr_field:
+        # No change, this is not solr field formatted in a
+        # way we'd expect data_type specific variants. 
+        return solr_field
+    parts = solr_field.split(SolrDocument.SOLR_VALUE_DELIM)
+    general_part = parts[-1]
+    first_part = SolrDocument.SOLR_VALUE_DELIM.join(parts[0:-1])
+    if '_' in general_part:
+        general_part = general_part.split('_')[0]
+    new_ending = get_solr_predicate_type_string(
+        data_type, 
+        prefix=(general_part + '_')
+    )
+    return first_part + SolrDocument.SOLR_VALUE_DELIM + new_ending
+
+
+def get_data_type_for_solr_field(solr_field):
+    """Gets the data-type for a solr field
+
+    :param str solr_field: The solr field that we want to know
+        about its data type.
+    """
+    if not SolrDocument.SOLR_VALUE_DELIM in solr_field:
+        return None
+    parts = solr_field.split(SolrDocument.SOLR_VALUE_DELIM)
+    suffix_part = parts[-1]
+    if not '_' in suffix_part:
+        # We can't break apart the suffix to find the
+        # solr data type
+        return None
+    suffix_parts = suffix_part.split('_')
+    solr_data_type = suffix_parts[-1]
+
+    # Return the mapping between the solr_data_type part
+    # and the predicate data types.
+    return SOLR_DATA_TYPE_TO_PREDICATE.get(
+        solr_data_type
+    )
 
 
 def join_solr_query_terms(terms_list, operator='AND'):
@@ -104,12 +269,26 @@ def join_solr_query_terms(terms_list, operator='AND'):
     return terms_str
 
 
+def fq_slug_value_format(slug, value_slug_length_limit=120):
+    """Formats a slug for a Solr query value"""
+    if SolrDocument.DO_LEGACY_FQ:
+        return slug
+    # NOTE: The '-' character is reserved in Solr, so we need to replace
+    # it with a '_' character in order to do prefix queries on the slugs.
+    slug = slug.replace('-', '_')
+    slug += SolrDocument.SOLR_VALUE_DELIM
+    slug = (
+        slug[:value_slug_length_limit] + '*'
+    )
+    return slug
+
+
 def make_solr_term_via_slugs(
     field_slug,
     solr_dyn_field,
     value_slug,
     field_parent_slug=None,
-    solr_field_suffix='_fq',
+    solr_field_suffix='',
 ):
     """Makes a solr query term from slugs
     
@@ -128,6 +307,14 @@ def make_solr_term_via_slugs(
     :param str value_slug: A string for the slug value that we want
         to query.
     """
+    if SolrDocument.DO_LEGACY_FQ:
+        # Doing the legacy filter query method, so add a
+        # suffix of _fq to the solr field.
+        solr_field_suffix = '_fq'
+    
+    # Format the value slug for the filter query.
+    value_slug = fq_slug_value_format(value_slug)
+
     solr_parent_prefix = field_slug.replace('-', '_')
     if field_parent_slug:
         # Add the immediate parent part of the solr
@@ -219,7 +406,7 @@ def get_request_param_value(
     require_float=False,
     require_int=False,
 ):
-    """ Return a list, str, float, or int (dependig on args) from a
+    """ Return a list, str, float, or int (depending on args) from a
         request dict:
     
     :param dict request_dict: The dictionary of keyed by client
@@ -294,6 +481,11 @@ def prep_string_search_term_list(raw_fulltext_search):
     return terms
 
 
+
+# ---------------------------------------------------------------------
+# DICTIONARY RELATED FUNCTIONS
+# ---------------------------------------------------------------------
+
 def make_request_obj_dict(request, spatial_context=None):
     """Extracts GET parameters and values from a Django
     request object into a dictionary obj
@@ -314,6 +506,151 @@ def safe_remove_item_from_list(item, item_list):
     return item_list
 
 
+def combine_query_dict_lists(part_query_dict, main_query_dict, skip_keys=[]):
+    """Combines lists from the part_query_dict into the 
+    
+    :param dict part_query_dict: The smaller query dict that will get
+        merged into the main_query_dict.
+    :param dict main_query_dict: The main query dict that we're adding
+        to.
+    :param list skip_keys: List of keys to skip and not include in
+        adding to the main_query_dict.
+    """
+    if not part_query_dict:
+        return main_query_dict
+    for key, values in part_query_dict.items():
+        if key in skip_keys or not values:
+            continue
+        if key not in main_query_dict:
+            main_query_dict[key] = values
+        elif (isinstance(main_query_dict[key], list)
+            and isinstance(values, list)):
+            main_query_dict[key] += values
+    return main_query_dict
+
+
+def get_dict_path_value(path_keys_list, dict_obj, default=None):
+    """Get a value from a dictionary object by a list of keys """
+    if not isinstance(dict_obj, dict):
+        return None
+    act_obj = copy.deepcopy(dict_obj)
+    for key in path_keys_list:
+        act_obj = act_obj.get(key, default)
+        if not isinstance(act_obj, dict):
+            return act_obj
+    return act_obj
+
+
+# ---------------------------------------------------------------------
+# Solr Response (JSON) Object Related Functions
+# ---------------------------------------------------------------------
+def parse_solr_encoded_entity_str(
+    entity_str,
+    base_url='', 
+    solr_value_delim=SolrDocument.SOLR_VALUE_DELIM,
+    solr_slug_format=False
+):
+    """Parses an entity string encoded for solr"""
+    
+    # NOTE: This is reverse of the function:
+    # SolrDocument.make_entity_string_for_solr
+    if not solr_value_delim in entity_str:
+        return None
+    
+    parts = entity_str.split(solr_value_delim)
+    if len(parts) < 4:
+        # Not a valid encoding so skip.
+        return None
+    
+    if len(parts) == 5 and parts[3] != parts[4]:
+        alt_label = parts[4]
+    else:
+        alt_label = None
+
+    if (parts[2].startswith('http://') 
+        or parts[2].startswith('https://')):
+        # We already have a full url.
+        uri = parts[2]
+    else:
+        # Use the base url to make a full url.
+        uri = base_url + parts[2]
+    
+    # Return a dictionary of the parsed entity.
+    if not solr_slug_format:
+        slug = parts[0].replace('_', '-')
+    else:
+        slug = parts[0]
+
+    return {
+        'slug': slug,
+        'data_type': parts[1],
+        'uri': uri,
+        'label': parts[3],
+        'alt_label': alt_label,
+    }
+
+
+
+def get_rounding_level_from_float(float_val):
+    """Gets a data-type for a solr field"""
+    if not isinstance(float_val, float):
+        return None
+    val_str = str(float_val)
+    if not '.' in val_str:
+        # rounds to the 0th decimal
+        return 0
+    parts = val_str.split('.')
+    return len(parts[-1])
+
+
+
+def get_facet_value_count_tuples(solr_facet_value_count_list, no_zeros=True):
+    """Gets facet values and counts from a list solr facet value count list
+
+    :param list solr_facet_value_count_list: List of facet values and
+        counts that alternate. This is how the SOLR json response provides
+        facet values and counts, and it is a little inconvenient, so to
+        make it easier to use, this function returns the same information
+        in a list of (facet_value, count) tuples.
+    """
+    facet_value_count_tuples = []
+    for i in range(0, len(solr_facet_value_count_list), 2):
+        facet_value = solr_facet_value_count_list[i]
+        facet_count = solr_facet_value_count_list[(i + 1)]
+        if no_zeros and facet_count == 0:
+            # Remove facet counts of zero.
+            continue
+        facet_value_count_tuples.append(
+            (facet_value, facet_count,)  # tuple representation
+        )
+    return facet_value_count_tuples
+
+
+def get_path_facet_value_count_tuples(
+    path_keys_list, 
+    solr_response_dict, 
+    default=[]
+):
+    """Gets a list of facet value, count tuples form a solr response
+
+    :param list path_keys_list: List of keys to identify the facet field
+        and get facet values and counts
+    :param dict solr_response_dict: Dictionary generated from a solr
+        JSON response
+    """
+    solr_facet_value_count_list = get_dict_path_value(
+        path_keys_list, 
+        solr_response_dict, 
+        default=None
+    )
+    if not isinstance(solr_facet_value_count_list, list):
+        # We didn't find the expected list, so return None.
+        return default
+    # Transform SOLR's weird response list into a list of solr
+    # (facet_value, facet_count,) tuples.
+    return get_facet_value_count_tuples(solr_facet_value_count_list)
+
+
 # ---------------------------------------------------------------------
 # Date-Time Related Functions
 # ---------------------------------------------------------------------
@@ -321,16 +658,21 @@ def date_convert(date_str):
     """Converts to a python datetime if not already so """
     if isinstance(date_str, str):
         date_str = date_str.replace('Z', '')
+        if not 'T' in date_str:
+            date_str += 'T00:00:00'
         dt = datetime.datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S')
-    else:
-        dt = date_str
-    return dt
+        return dt
+    return date_str
 
+
+def datetime_to_solr_date_str(dt):
+    """Makes a solr date string form a datetime object"""
+    return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
 
 def convert_date_to_solr_date(date_str):
     """Converts a string for a date into a Solr formated datetime string """
     dt = date_convert(date_str)
-    return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+    return datetime_to_solr_date_str(dt)
 
 
 def make_human_readable_date(date_str):
@@ -341,3 +683,189 @@ def make_human_readable_date(date_str):
     if check_dt == dt:
         return check_date
     return dt.strftime('%Y-%m-%d:%H:%M:%S')
+
+
+def get_date_difference_for_solr(min_date, max_date, groups):
+    """ Gets a solr date difference from two values """
+    min_dt = date_convert(min_date)
+    max_dt = date_convert(max_date)
+    dif_dt = (max_dt - min_dt) / groups
+    if dif_dt.days >= 366:
+        solr_val = int(round((dif_dt.days / 365.25), 0))
+        solr_dif = '+' + str(solr_val) + 'YEAR'
+    elif dif_dt.days >= 31:
+        solr_val = int(round((dif_dt.days / 30), 0))
+        solr_dif = '+' + str(solr_val) + 'MONTH'
+    elif dif_dt.days >= 1:
+        solr_val = int(round(dif_dt.days, 0))
+        solr_dif = '+' + str(solr_val) + 'DAY'
+    elif (dif_dt.seconds // 3600) >= 1:
+        solr_val = int(round((dif_dt.seconds // 3600), 0))
+        solr_dif = '+' + str(solr_val) + 'HOUR'
+    elif ((dif_dt.seconds % 3600) // 60) >= 1:
+        solr_val = int(round(((dif_dt.seconds % 3600) // 60), 0))
+        solr_dif = '+' + str(solr_val) + 'MINUTE'
+    elif dif_dt.seconds >= 1:
+        solr_val = int(round(dif_dt.seconds, 0))
+        solr_dif = '+' + str(solr_val) + 'SECOND'
+    else:
+        solr_dif = '+1YEAR'
+    return solr_dif
+
+
+def add_solr_gap_to_date(date_val, solr_gap):
+    """ Adds a solr gap to a date_val """
+    solr_val = re.sub(r'[^\d.]', r'', solr_gap)
+    solr_val = int(float(solr_val))
+    dt = date_convert(date_val)
+    if 'YEAR' in solr_gap:
+        dt = dt + datetime.timedelta(days=int(round((solr_val * 365.25), 0)))
+    elif 'MONTH' in solr_gap:
+        dt = dt + datetime.timedelta(days=(solr_val * 30))
+    elif 'DAY' in solr_gap:
+        dt = dt + datetime.timedelta(days=solr_val)
+    elif 'HOUR' in solr_gap:
+        dt = dt + datetime.timedelta(hours=solr_val)
+    elif 'MINUTE' in solr_gap:
+        dt = dt + datetime.timedelta(minutes=solr_val)
+    elif 'SECOND' in solr_gap:
+        dt = dt + datetime.timedelta(seconds=solr_val)
+    else:
+        dt = dt
+    return dt
+
+
+# ---------------------------------------------------------------------
+# GEOSPATIAL AND TIME FUNCTIONS
+# ---------------------------------------------------------------------
+def get_aggregation_depth_to_group_paths( 
+    max_groups,
+    paths,
+    max_depth=None
+):
+    """Gets the number of characters needed to group a list
+    of hiearchic path strings.
+
+    :param int max_groups: The maximum number of groups wanted.
+    :param list paths: A list of hiearchically encoded string values
+        that we want to group together.
+    :param int max_depth: The default depth (the max)
+    """
+
+    # NOTE: Geospatial points and chronological time-spans
+    # can be prepresented as hierarchic paths of strings. This
+    # function is used to help determine the level depth of
+    # aggregation needed to group these stings into a max number
+    # of groups or less.
+
+    if max_depth is None:
+        # We're assuming that all the paths are strings of the
+        # same length.
+        max_depth = len(paths[0])
+
+    if len(paths) <= max_groups:
+        return max_depth
+    
+    keep_looping = True
+    agg_depth = max_depth
+    while keep_looping and agg_depth > 0:
+        agg_depth -= 1
+        agg_paths = [p[:agg_depth] for p in paths]
+        agg_count = len(set(agg_paths))
+        if agg_count <= max_groups:
+            keep_looping = False
+            return agg_depth
+    return agg_depth
+
+
+def validate_geo_coordinate(coordinate, coord_type):
+    """Validates a geo-spatial coordinate """
+    try:
+        fl_coord = float(coordinate)
+    except ValueError:
+        return False
+    if 'lat' in coord_type:
+        if (fl_coord <= 90 
+            and fl_coord >= -90):
+            return True
+    elif 'lon' in coord_type:
+        if (fl_coord <= 180 
+            and fl_coord >= -180):
+            return True
+    return False
+
+def validate_geo_lon_lat(lon, lat):
+    """ checks to see if a lon, lat pair
+        are valid. Note the GeoJSON ordering
+        of the coordinates
+    """
+    lon_valid = validate_geo_coordinate(lon, 'lon')
+    lat_valid = validate_geo_coordinate(lat, 'lat')
+    if lon_valid and lat_valid:
+        return True
+    return False
+
+def validate_bbox_coordinates(bbox_coors):
+    """Validates a set of bounding box coordinates """
+    if len(bbox_coors) != 4:
+        # Need four coordinates (2 points) for a box
+        return False
+
+    lower_left_valid = validate_geo_lon_lat(
+        bbox_coors[0], bbox_coors[1]
+    )
+    top_right_valid = validate_geo_lon_lat(
+        bbox_coors[2], bbox_coors[3])
+    if not lower_left_valid or not top_right_valid:
+        return False
+
+    if (float(bbox_coors[0]) < float(bbox_coors[2]) 
+        and float(bbox_coors[1]) < float(bbox_coors[3])):
+        return True
+    else:
+        return False
+
+def return_validated_bbox_coords(bbox_str):
+    """Returns a valid bounding box coordinate list of floats"""
+    if not isinstance(bbox_str, str):
+        return False
+    if not ',' in bbox_str:
+        return False
+    bbox_coors = [c.strip() for c in bbox_str.split(',')]
+    valid = validate_bbox_coordinates(bbox_coors)
+    if not valid:
+        return False
+    valid_bbox_coors = [float(c) for c in bbox_coors]
+    return valid_bbox_coors
+
+def estimate_good_coordinate_rounding(
+    lon_a, 
+    lat_a, 
+    lon_b, 
+    lat_b, 
+    min_round=2, 
+    max_round=20,
+):
+    """Estimates a good rounding precision for display"""
+    dist = math.sqrt(
+        math.pow((lon_b - lon_a), 2)
+        + math.pow((lat_b - lat_a), 2)
+    )
+    round_level = min_round
+    round_more = True
+    while round_more:
+        round_dist = round(dist, round_level)
+        trunc_dist = math.trunc(dist * pow(10, round_level))
+        print('{} has round: {}, trunc {} at round_level {}'.format(
+                dist,
+                round_dist,
+                trunc_dist,
+                round_level,
+            )
+        ) 
+        if ((round_dist > 0.0 and trunc_dist >= 5) 
+            or round_level >= max_round):
+            round_more = False
+        else:
+            round_level += 1
+    return round_level

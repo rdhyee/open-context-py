@@ -25,6 +25,7 @@ static/3d-nexus/
 static/3Dhop-4-1/
 static/3Dhop-4-2/
 static/bootstrap-slider/
+static/bootstrap-vue/
 static/robots/robots.txt
 *.pyc
 solr-config/schema.xml.old
@@ -37,3 +38,6 @@ node_modules
 bower_components
 static/d3/d3.v3.min.js
 .oc-django-1-venv/
+.oc-dev-venv/
+.vs-code/
+.venv/
