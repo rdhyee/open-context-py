@@ -346,6 +346,10 @@
       args:
         chdir: "{{tempdir_1.path}}/static"
 
+    # sudo -u www-data cp -prv /var/oc-venv/static/oc/* /var/oc-venv/staticroot/oc/
+    - name: copy all static files from the  repo to update files from the static archive
+      shell: "cp -prv {{oc_install_dir}}/static/oc/* {{oc_static_root}}/oc"
+
     - name: Change file ownership for static files
       command: "chown -R {{user_owner}}:{{group_owner}} {{oc_static_root}}"
       changed_when: false
