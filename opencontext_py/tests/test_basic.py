@@ -130,7 +130,8 @@ def test_other_pages():
         '/projects-search/',
         '/subjects-search/#1/-10/13/6/any/Google-Satellite',
         '/search/#2/45.0/0.0/6/any/Google-Satellite',
-        '/projects/3FAAA477-5572-4B05-8DC1-CA264FE1FC10'
+        '/projects/3FAAA477-5572-4B05-8DC1-CA264FE1FC10',
+        '/subjects-search/.json?response=geo-project',
     ]
 
     client = Client()
