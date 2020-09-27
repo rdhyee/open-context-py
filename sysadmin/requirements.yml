@@ -1,0 +1,34 @@
+---
+- src: geerlingguy.postgresql
+  version: 2.2.1 
+
+# https://github.com/rdhyee/ansible-python/tree/a53b2f1d68cc78240d218bc541f577171a040bdf
+- src: https://github.com/rdhyee/ansible-python
+  version: a53b2f1d68cc78240d218bc541f577171a040bdf
+
+- src: geerlingguy.SOLR
+  version: 5.1.0
+
+- src: DavidWittman.redis
+  version: 1.2.7
+
+- src: idealista.solrcloud-role
+  version: 2.4.0
+  name: solrcloud
+
+# # /Users/raymondyee/.ansible/roles
+# - ANXS.postgresql, v1.10.1
+# - geerlingguy.postgresql, 1.4.3
+# - whiskerlabs.python, v0.0.3
+# - geerlingguy.java, 1.9.1
+# - ansiblebit.oracle-java, 6.22.2
+# - solrcloud, 2.4.0
+# - DavidWittman.redis, 1.2.7
+# - geerlingguy.SOLR, 5.1.0
+# - ansible-python, a53b2f1d68cc78240d218bc541f577171a040bdf
+# - williamyeh.oracle-java, 2.11.0
+# # /etc/ansible/roles
+# - mychiara.docker, 1.5.0
+# - franklinkim.docker, 1.7.0
+# - gorsuch.docker, v0.1.0
+# - mongrelion.docker, master
