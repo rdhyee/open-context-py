@@ -26,6 +26,26 @@ BAD_PREDICATE_TYPES_TO_STRING = [
     'False'
 ]
 
+PREDICATE_DATA_TYPE_TO_SOLR = {
+    '@id': 'id',
+    'id': 'id',
+    'types': 'id',
+    False: 'id',
+    'xsd:boolean': 'bool',
+    'xsd:integer': 'int',
+    'xsd:double': 'double',
+    'xsd:string': 'string',
+    'xsd:date': 'date',
+}
+
+SOLR_DATA_TYPE_TO_PREDICATE = {
+    'id': 'id',
+    'bool': 'xsd:boolean',
+    'int': 'xsd:integer',
+    'double': 'xsd:double',
+    'string': 'xsd:string',
+    'date': 'xsd:date',
+}
 
 def get_solr_predicate_type_string(
     predicate_type,
@@ -34,7 +54,42 @@ def get_solr_predicate_type_string(
 ):
     '''
     Defines whether our dynamic solr fields names for
-    predicates end with ___pred_id, ___pred_numeric, etc.
+    predicates end with ___pred_id, ___pred_double, etc.
+    
+    :param str predicate_type: String data-type used by Open
+        Context
+    :param str prefix: String prefix to append before the solr type
+    :param list string_default_pred_types: list of values that
+        default to string without triggering an exception.
+    '''
+    if not string_default_pred_types:
+        # If not set, use the default
+        string_default_pred_types = BAD_PREDICATE_TYPES_TO_STRING.copy()
+    
+    solr_data_type = PREDICATE_DATA_TYPE_TO_SOLR.get(
+        predicate_type
+    )
+    if solr_data_type:
+        # The happy option where we find a configured data type
+        return prefix + solr_data_type
+    
+    # Check a fallback to string.
+    if predicate_type in string_default_pred_types:
+        return prefix + 'string'
+    else:
+        raise Exception(
+            "Unknown predicate type: {}".format(predicate_type)
+        )
+
+
+def old_get_solr_predicate_type_string(
+    predicate_type,
+    prefix='',
+    string_default_pred_types=None,
+):
+    '''
+    Defines whether our dynamic solr fields names for
+    predicates end with ___pred_id, ___pred_double, etc.
     
     :param str predicate_type: String data-type used by Open
         Context
@@ -47,8 +102,12 @@ def get_solr_predicate_type_string(
         string_default_pred_types = BAD_PREDICATE_TYPES_TO_STRING.copy()
     if predicate_type in ['@id', 'id', 'types', False]:
         return prefix + 'id'
-    elif predicate_type in ['xsd:integer', 'xsd:double', 'xsd:boolean']:
-        return prefix + 'numeric'
+    elif predicate_type == 'xsd:boolean':
+        return prefix + 'bool'
+    elif predicate_type == 'xsd:integer':
+        return prefix + 'int'
+    elif predicate_type == 'xsd:double':
+        return prefix + 'double'
     elif predicate_type == 'xsd:string':
         return prefix + 'string'
     elif predicate_type == 'xsd:date':
@@ -59,6 +118,7 @@ def get_solr_predicate_type_string(
         raise Exception(
             "Unknown predicate type: {}".format(predicate_type)
         )
+
 
 
 def general_get_jsonldish_entity_parents(identifier, add_original=True, is_project=False):
@@ -113,7 +173,13 @@ def make_entity_string_for_solr(
     )
     if isinstance(uri_parsed, dict):
         id_part = '/' + uri_parsed['item_type'] + '/' + uri_parsed['uuid']
-    slug = solr_doc_prefix + slug
+    # NOTE: The '-' character is reserved in Solr, so we need to replace
+    # it with a '_' character in order to do prefix queries on the slugs.
+    if solr_doc_prefix:
+        solr_doc_prefix = solr_doc_prefix.replace('-', '_')
+        if not slug.startswith(solr_doc_prefix):
+            slug = solr_doc_prefix + slug 
+    slug = slug.replace('-', '_')
     return solr_value_delim.join(
         [slug, type, id_part, label]
     )
@@ -129,6 +195,13 @@ uuid = '9095FCBB-35A8-452E-64A3-B8D52A0B2DB3'
 sd_obj = SolrDocumentNew(uuid)
 sd_obj.make_solr_doc()
 sd_obj.fields
+
+# Example item with a boolean field
+from opencontext_py.apps.indexer.solrdocumentnew import SolrDocumentNew
+uuid_m = '000DF962-E653-4125-CD0D-7C948C41EC4E'
+sd_obj_m = SolrDocumentNew(uuid_m)
+sd_obj_m.make_solr_doc()
+sd_obj_m.fields
 
 from opencontext_py.apps.indexer.solrdocumentnew import SolrDocumentNew
 # Example with missing predicate
@@ -212,7 +285,16 @@ uuid_l = 'b8cec4d8-0926-4c38-836b-91a94920d5c1'
 sd_obj_l = SolrDocumentNew(uuid_l)
 sd_obj_l.make_solr_doc()
 sd_obj_l.fields
+
     '''
+
+
+    # DO_LEGACY_FQ adds solr fields specifically for filter queries
+    # that only contain slug values. These solr fields end with "_fq".
+    # We're in the process of deprecating these, since they do not
+    # offer any evidence of better filtering performance and probably
+    # bloat our solr index. 
+    DO_LEGACY_FQ = False
 
     # the list below defines predicates used for
     # semantic equivalence in indexing
@@ -283,9 +365,9 @@ sd_obj_l.fields
     ROOT_PROJECT_SOLR = 'root' + SOLR_VALUE_DELIM + FIELD_SUFFIX_PROJECT
     ALL_PROJECT_SOLR = 'obj_all' + SOLR_VALUE_DELIM + FIELD_SUFFIX_PROJECT
     EQUIV_LD_SOLR = 'skos_closematch' + SOLR_VALUE_DELIM + FIELD_SUFFIX_PREDICATE
-    FILE_SIZE_SOLR = 'filesize' + SOLR_VALUE_DELIM + 'pred_numeric'
+    FILE_SIZE_SOLR = 'filesize'
     FILE_MIMETYPE_SOLR = 'mimetype' + SOLR_VALUE_DELIM + FIELD_SUFFIX_PREDICATE
-    RELATED_SOLR_DOC_PREFIX = 'rel--'
+    RELATED_SOLR_DOC_PREFIX = 'REL_'
 
 
     # Maximum depth of geotile zoom
@@ -301,19 +383,38 @@ sd_obj_l.fields
     # work.
     HUMAN_REMAINS_FIELD_VALUES = [
         # Classified with Open Context's class-uri of oc-gen:cat-human-bone.
-        ('{}obj_all___oc_gen_subjects___pred_id_fq', 'oc-gen-cat-human-bone'),
+        ('{}obj_all___oc_gen_subjects___pred_id_fq', 'oc_gen_cat_human_bone'),
         
         # Has biological taxonomy of homo sapiens in EOl or GBIF.
-        ('{}obj_all___biol_term_hastaxonomy___pred_id_fq', 'eol-p-327955'),
-        ('{}obj_all___biol_term_hastaxonomy___pred_id_fq', 'gbif-sp-2436436'),
+        ('{}obj_all___biol_term_hastaxonomy___pred_id_fq', 'eol_p_327955'),
+        ('{}obj_all___biol_term_hastaxonomy___pred_id_fq', 'gbif_sp_2436436'),
+        ('{}obj_all___obo_foodon_00001303___pred_id_fq', 'eol_p_327955'),
+        ('{}obj_all___obo_foodon_00001303___pred_id_fq', 'gbif_sp_2436436'),
         
         # Has specific metadata about human remains assigned to the record.
         # Human-remains (archaeology)
-        ('{}obj_all___dc_terms_subject___pred_id_fq', 'loc-sh-sh92003545'),
+        ('{}obj_all___dc_terms_subject___pred_id_fq', 'loc_sh_sh92003545'),
         # Human skeleton
-        ('{}obj_all___dc_terms_subject___pred_id_fq', 'loc-sh-sh85062895'),
+        ('{}obj_all___dc_terms_subject___pred_id_fq', 'loc_sh_sh85062895'),
         # Burial
-        ('{}obj_all___dc_terms_subject___pred_id_fq', 'loc-sh-sh85018080'),
+        ('{}obj_all___dc_terms_subject___pred_id_fq', 'loc_sh_sh85018080'),
+
+        # Classified with Open Context's class-uri of oc-gen:cat-human-bone.
+        ('{}obj_all___oc_gen_subjects___pred_id', 'oc_gen_cat_human_bone'),
+        
+        # Has biological taxonomy of homo sapiens in EOl or GBIF.
+        ('{}obj_all___biol_term_hastaxonomy___pred_id', 'eol_p_327955'),
+        ('{}obj_all___biol_term_hastaxonomy___pred_id', 'gbif_sp_2436436'),
+        ('{}obj_all___obo_foodon_00001303___pred_id', 'eol_p_327955'),
+        ('{}obj_all___obo_foodon_00001303___pred_id', 'gbif_sp_2436436'),
+        
+        # Has specific metadata about human remains assigned to the record.
+        # Human-remains (archaeology)
+        ('{}obj_all___dc_terms_subject___pred_id', 'loc_sh_sh92003545'),
+        # Human skeleton
+        ('{}obj_all___dc_terms_subject___pred_id', 'loc_sh_sh85062895'),
+        # Burial
+        ('{}obj_all___dc_terms_subject___pred_id', 'loc_sh_sh85018080'),
     ]
     
     
@@ -327,7 +428,7 @@ sd_obj_l.fields
         # slug values only. These fields seem to only bloat the
         # solr index and do not seem to improve performace, so we
         # are in the process of deprecating them.
-        self.do_legacy_id_fq = False
+        self.do_legacy_id_fq = self.DO_LEGACY_FQ
 
         # Are we doing a related document? Related documents are
         # made to add extra metadata to a solr document. Typically
@@ -376,15 +477,44 @@ sd_obj_l.fields
         """Converts a slug to a solr style slug."""
         # slug = self.solr_doc_prefix + slug
         return slug.replace('-', '_')
+    
+    def _prefix_solr_field(self, solr_field, act_solr_doc_prefix=None):
+        """Makes a solr field, with a prefix if needed"""
 
-    def _make_entity_string_for_solr_value(self, slug, type, id, label):
+        if act_solr_doc_prefix is None and not len(self.solr_doc_prefix):
+            return self._convert_slug_to_solr(solr_field)
+        
+        if act_solr_doc_prefix is None:
+            # The act_solr_prefix is not set, so default to the
+            # solr_doc_prefix for this class.
+            act_solr_doc_prefix = self.solr_doc_prefix
+
+        act_solr_doc_prefix = self._convert_slug_to_solr(
+            act_solr_doc_prefix
+        )
+        if not solr_field.startswith(act_solr_doc_prefix):
+            solr_field = act_solr_doc_prefix + solr_field
+        return self._convert_slug_to_solr(solr_field)
+
+    def _make_entity_string_for_solr_value(
+        self, 
+        slug, 
+        type, 
+        id, 
+        label, 
+        act_solr_doc_prefix=None
+    ):
         """Make a solr value for an object item."""
+        if act_solr_doc_prefix is None:
+            # The act_solr_prefix is not set, so default to the
+            # solr_doc_prefix for this class.
+            act_solr_doc_prefix = self.solr_doc_prefix
         return make_entity_string_for_solr(
-            slug,
+            self._convert_slug_to_solr(slug),
             type,
             id,
             label,
-            solr_doc_prefix=self.solr_doc_prefix,
+            solr_doc_prefix=act_solr_doc_prefix,
             solr_value_delim=self.SOLR_VALUE_DELIM,
         )
 
@@ -413,7 +543,8 @@ sd_obj_l.fields
     def _make_slug_type_uri_label(self):
         """Makes a slug_type_uri_label field for solr """
         parts = [
-            self.oc_item.json_ld['slug']
+            # Make sure '-' characters are OK for solr.
+            self._convert_slug_to_solr(self.oc_item.json_ld['slug'])
         ]
         if self.oc_item.manifest.item_type == 'predicates':
             if self.oc_item.json_ld['oc-gen:data-type']:
@@ -465,7 +596,8 @@ sd_obj_l.fields
             solr_id_field,
             concat_val,
             slug,
-            do_fq_only=False
+            do_fq_only=False,
+            act_solr_doc_prefix=None,
         ):
         """Adds values for an id field, and the associated slug
            value for the related _fq field
@@ -473,6 +605,11 @@ sd_obj_l.fields
         if (not isinstance(solr_id_field, str) or
             not isinstance(concat_val, str)):
             return None
+        
+        if act_solr_doc_prefix is None:
+            # The act_solr_prefix is not set, so default to the
+            # solr_doc_prefix for this class.
+            act_solr_doc_prefix = self.solr_doc_prefix
         
         # NOTE: do_fq_only is a legacy argument for this function
         # We will force it to be false if we're not making a solr
@@ -482,7 +619,18 @@ sd_obj_l.fields
 
         # Add the main solr id field if not present,
         # then append the concat_val
-        solr_id_field = self._convert_slug_to_solr(solr_id_field)
+        
+        # A descriptive field (for props), not a context or
+        # a project field. So this can take a solr-doc prefix
+        # to indicate it is a related property.
+        solr_id_field = self._prefix_solr_field(
+            solr_id_field,
+            # The act_solr_doc_prefix can override the default for the
+            # solr_doc_prefix for the whole document object  
+            act_solr_doc_prefix=act_solr_doc_prefix
+        )
+        
+
         if do_fq_only is False and solr_id_field not in self.fields:
             self.fields[solr_id_field] = []
         if (do_fq_only is False and
@@ -539,7 +687,8 @@ sd_obj_l.fields
                 proj['slug'],
                 'id',
                 get_id(proj),
-                proj['label']
+                proj['label'],
+                act_solr_doc_prefix='', # No prefixing for projects!
             )
             # The self.ALL_PROJECT_SOLR takes values for
             # each project item in project hierarchy, thereby
@@ -551,14 +700,16 @@ sd_obj_l.fields
                 self.ALL_PROJECT_SOLR,
                 act_solr_value,
                 proj['slug'],
-                do_fq_only=True
+                do_fq_only=True,
+                act_solr_doc_prefix='', # No prefixing for projects!
             )
             # Now add the current proj. to the solr field for the current
             # level of the project hierarchy.
             self._add_id_field_fq_field_values(
                 solr_field_name,
                 act_solr_value,
-                proj['slug']
+                proj['slug'],
+                act_solr_doc_prefix='', # No prefixing for projects!
             )
             # Make the new solr_field_name for the next iteration of the loop.
             solr_field_name = (
@@ -626,7 +777,8 @@ sd_obj_l.fields
                 context['slug'],
                 'id',
                 ('/subjects/' + context_uuid),
-                context['label']
+                context['label'],
+                act_solr_doc_prefix='', # No prefixing for contexts!
             )
             # The self.ALL_CONTEXT_SOLR takes values for
             # each context item in spatial context hierarchy, thereby
@@ -638,7 +790,8 @@ sd_obj_l.fields
                 self.ALL_CONTEXT_SOLR,
                 act_solr_value,
                 context['slug'],
-                do_fq_only=True
+                do_fq_only=True,
+                act_solr_doc_prefix='', # No prefixing for contexts!
             )
             if index == 0:
                 # We are at the top of the spatial hierarchy
@@ -655,7 +808,8 @@ sd_obj_l.fields
             self._add_id_field_fq_field_values(
                 solr_context_field,
                 act_solr_value,
-                context['slug']
+                context['slug'],
+                act_solr_doc_prefix='', # No prefixing for contexts!
             )
 
     def _get_predicate_type_from_dict(self, predicate_dict):
@@ -679,10 +833,8 @@ sd_obj_l.fields
         # The act_solr_field starts at the solr field that is
         # for the root of the hierarchy, passed as an argument to
         # this function.
-        solr_field_prefix = self._convert_slug_to_solr(
-            self.solr_doc_prefix
-        )
-        act_solr_field = solr_field_prefix + root_solr_field
+        act_solr_field = self._prefix_solr_field(root_solr_field)
+        
         # The all_obj_solr_field is defined for the solr field
         # at the root of this hierarchy. It will take values for
         # each item in the object value hierarchy, thereby
@@ -691,12 +843,14 @@ sd_obj_l.fields
         # to know the full hierarchy path of parent items in order
         # to query for a given object value.
         all_obj_solr_field = (
-            solr_field_prefix +
             'obj_all' +
             self.SOLR_VALUE_DELIM +
             root_solr_field
         )
-        
+        all_obj_solr_field = self._prefix_solr_field(
+            all_obj_solr_field
+        )
+
         # Now iterate through the list of hierarchy items of
         # object values.
         for index, item in enumerate(hierarchy_items):
@@ -869,12 +1023,38 @@ sd_obj_l.fields
                         errors='surrogateescape'
                     )
                     self.fields[solr_field_name].append(str(act_str))
-        elif solr_pred_type == 'numeric':
+        elif solr_pred_type in ['int', 'double', 'numeric']:
             # Add numeric literal values ot the solr_field_name in the
             # solr document.
             for val_obj in pred_value_objects:
                 self.fields['text'] += str(val_obj) + ' \n'
+                # Now make sure this validates as a number.
+                try:
+                    val_obj = float(val_obj)
+                except:
+                    val_obj = None
+                if val_obj is not None and solr_pred_type == 'int':
+                    try:
+                        val_obj = int(val_obj)
+                    except:
+                        val_obj = None
+                if val_obj is None:
+                    # Skip, this does not validate so do not add to the
+                    # solr field.
+                    continue
                 self.fields[solr_field_name].append(val_obj)
+        elif solr_pred_type == 'bool':
+            # Add date literal values ot the solr_field_name in the
+            # solr document.
+            for val_obj in pred_value_objects:
+                bool_val = None
+                if not val_obj or val_obj == 0:
+                    bool_val = False
+                elif val_obj or val_obj == 1:
+                    bool_val = True
+                if bool_val is not None:
+                    self.fields[solr_field_name].append(bool_val) 
+                self.fields['text'] += str(bool_val) + ' \n'
         elif solr_pred_type == 'date':
             # Add date literal values ot the solr_field_name in the
             # solr document.
@@ -896,6 +1076,9 @@ sd_obj_l.fields
     def _add_predicate_hierarchy(self, hierarchy_items, root_solr_field):
         """Adds a hierarchy of predicates to the solr doc."""
         last_item_index = len(hierarchy_items) - 1
+        solr_fields_values = []
+        pred_obj_all_field = None
+        attribute_field_part = ''
         for index, item in enumerate(hierarchy_items):
             if item['slug'] == 'link':
                 # Skip the standard link, we don't do
@@ -903,7 +1086,7 @@ sd_obj_l.fields
                 continue
             if index < last_item_index:
                 # Add the label of the hierarchy item
-                # to the text field, to faciliate key-word searches.
+                # to the text field, to facilitate key-word searches.
                 self.fields['text'] += ' ' + str(item['label']) + ' '
             
             # Compose the solr value for the current parent item.
@@ -924,9 +1107,52 @@ sd_obj_l.fields
                 # solr field name comes from the previous (parent)
                 # item in the hierarchy.
                 solr_field_name = self._convert_slug_to_solr(
-                     hierarchy_items[index - 1]['slug'] +
-                     self.SOLR_VALUE_DELIM + 'pred_id'
+                    hierarchy_items[index - 1]['slug']
+                    + attribute_field_part
+                    + self.SOLR_VALUE_DELIM 
+                    + 'pred_id'
                 )
+            
+            if attribute_field_part == '' and index > 0:
+                # The attriute field part will be made from the slug
+                # at the top of the hierarchy_items of predicates. 
+                # This makes querying logic easier and more consistent.
+                attribute_field_part = self._convert_slug_to_solr(
+                    self.SOLR_VALUE_DELIM
+                    +  hierarchy_items[0]['slug']
+                )
+
+            if not pred_obj_all_field and index > 0:
+                # The obj_all field will be made from the slug at the
+                # top of hierarchy_items of predicates. This makes
+                # querying logic easier and more consistent with
+                # properties and type hierarchies.
+                pred_obj_all_field = self._prefix_solr_field(
+                    self._convert_slug_to_solr(
+                        (
+                            'obj_all'
+                            + self.SOLR_VALUE_DELIM
+                            + hierarchy_items[0]['slug']
+                            + self.SOLR_VALUE_DELIM
+                            + 'pred_id'
+                        )
+                    )
+                )
+                if not pred_obj_all_field in self.fields:
+                    self.fields[pred_obj_all_field] = []
+            
+            if (pred_obj_all_field 
+               and not act_solr_value in self.fields[pred_obj_all_field]):
+                # Add the current act_solr_value to the list of obj_all
+                # for this field, if it does not already exist.
+                self.fields[pred_obj_all_field].append(act_solr_value)
+
+            # Add to the list of tuples of solr fields and
+            # values, which could be a useful output of this
+            # function.
+            solr_fields_values.append(
+                (solr_field_name, act_solr_value,)
+            )
             # Now add the predicate hierarchy item to the
             # appropriate solr doc fields.
             self._add_id_field_fq_field_values(
@@ -934,6 +1160,7 @@ sd_obj_l.fields
                 act_solr_value,
                 item['slug']
             )
+        return solr_fields_values
 
     def _add_predicate_and_object_description(
             self,
@@ -945,8 +1172,10 @@ sd_obj_l.fields
         # the pred_key and making a dictionary object of this metadata.
         predicate = self.proj_graph_obj.lookup_predicate(pred_key)
         if not predicate:
+            print('Cannot find predicate: {}'.format(pred_key))
             # The predicate does not seem to exist. Skip out.
             return None
+
         if not 'uuid' in predicate or not predicate.get('slug'):
             print('Wierd predicate: {}'.format(str(predicate)))
             hierarchy_items = []
@@ -960,7 +1189,7 @@ sd_obj_l.fields
         # starting at the self.ROOT_PREDICATE_SOLR
         self._add_predicate_hierarchy(
             hierarchy_items,
-            self.ROOT_PREDICATE_SOLR
+            self._prefix_solr_field(self.ROOT_PREDICATE_SOLR)
         )
         # Set up the solr field name for the predicate.
         solr_field_name = self._convert_slug_to_solr(
@@ -969,6 +1198,11 @@ sd_obj_l.fields
                 predicate, prefix=(self.SOLR_VALUE_DELIM + 'pred_')
             )
         )
+
+        solr_field_name = self._prefix_solr_field(
+            solr_field_name
+        )
+
         # Make sure the solr_field_name is in the solr document's
         # dictionary of fields.
         if solr_field_name not in self.fields:
@@ -1038,6 +1272,27 @@ sd_obj_l.fields
                     pred_key,
                     pred_value_objects
                 )
+    
+    def _is_object_linked_data(self, 
+        object_uri, 
+        allowed_oc_types=['persons', 'vocabularies', 'tables']):
+        """Checks if an object_uri is linked data or an allowed Open Context item_type"""
+        if not object_uri:
+            # Not an object URI so return false.
+            return False
+        # Attempt to parse the object_uri as an OC uri.
+        oc_dict = URImanagement.get_uuid_from_oc_uri(
+            object_uri, 
+            return_type=True
+        )
+        if not oc_dict:
+            # Not an Open Context URI, which makes the object_uri
+            # outside linked data.
+            return True
+        if oc_dict['item_type'] in allowed_oc_types:
+            # It is an Open Context URI, but of an allowed type
+            return True
+        return False
 
     def _add_object_uri(self, object_uri):
         """ Processes object URIs for inferred linked object entities"""
@@ -1046,6 +1301,10 @@ sd_obj_l.fields
         # indexed by solr).
         if not object_uri or not object_uri.startswith('http'):
             # We don't have an object_uri to add.
+            return None
+        if not self._is_object_linked_data(object_uri):
+            # This is not an object_uri for something that we
+            # want to index as linked data.
             return None
         if 'object_uri' not in self.fields:
             self.fields['object_uri'] = []
@@ -1061,7 +1320,11 @@ sd_obj_l.fields
         if not inferred_assertions:
             # No inferred assertions from liked data, so skip out.
             return None
+
         for assertion in inferred_assertions:
+
+            if False and assertion['type'] == 'xsd:double':
+                import pdb; pdb.set_trace()
             # Get any hierarchy that may exist for the predicate. The
             # current predicate will be the LAST item in this hierarchy.
             pred_hierarchy_items = general_get_jsonldish_entity_parents(
@@ -1069,9 +1332,9 @@ sd_obj_l.fields
             )
             # This adds the parents of the link data predicate to the solr document,
             # starting at the self.ROOT_LINK_DATA_SOLR
-            self._add_predicate_hierarchy(
+            pred_hierarchy_fields_values = self._add_predicate_hierarchy(
                 pred_hierarchy_items,
-                self.ROOT_LINK_DATA_SOLR
+                self._prefix_solr_field(self.ROOT_LINK_DATA_SOLR)
             )
             
             # Set up the solr field name for the link data predicate.
@@ -1081,6 +1344,8 @@ sd_obj_l.fields
                     assertion, prefix=(self.SOLR_VALUE_DELIM + 'pred_')
                 )
             )
+
+            solr_field_name = self._prefix_solr_field(solr_field_name)
             # Make sure the solr_field_name is in the solr document's
             # dictionary of fields.
             if solr_field_name not in self.fields:
@@ -1093,8 +1358,18 @@ sd_obj_l.fields
             # Add the dicts of linked data entity objects
             # together with the list of object literal values to make
             # a consoloidated linked data object list.
-            ld_object_list = [obj for _, obj in assertion['ld_objects'].items()]
-            ld_object_list += [obj for _, obj in assertion['oc_objects'].items()]
+            ld_object_list = [
+                obj for _, obj in assertion['ld_objects'].items()
+                # Limit adding objs to those that we want to treat as
+                # linked data.
+                if self._is_object_linked_data(obj.get('id'))
+            ]
+            ld_object_list += [
+                obj for _, obj in assertion['oc_objects'].items()
+                # Limit adding objs to those that we want to treat as
+                # linked data.
+                if self._is_object_linked_data(obj.get('id'))
+            ]
             ld_object_list += assertion['literals']
             
             # Add the predicate label to the text string to help
@@ -1344,6 +1619,10 @@ sd_obj_l.fields
                     # We're missing data needed for a disc_geosource
                     # value, so skip.
                     continue
+
+                # Adds reference to the entity that has non-point
+                # geospatial data for this item. It can be a containing
+                # entity or the item getting indexed itself.
                 self.fields['disc_geosource'] = self._make_entity_string_for_solr_value(
                     ref_slug,
                     'id',
@@ -1378,23 +1657,44 @@ sd_obj_l.fields
                 )
             )
         chrono_tile = ChronoTile()
-        if 'form_use_life_chrono_tile' not in self.fields:
-            self.fields['form_use_life_chrono_tile'] = []
-        if 'form_use_life_chrono_earliest' not in self.fields:
-                self.fields['form_use_life_chrono_earliest'] = []
-        if 'form_use_life_chrono_latest' not in self.fields:
-            self.fields['form_use_life_chrono_latest'] = []
+        chrono_fields = [
+            'form_use_life_chrono_tile',
+            'form_use_life_chrono_earliest',
+            'form_use_life_chrono_latest',
+            'form_use_life_chrono_point',
+        ]
+        # Start lists for each of the chronological fields.
+        for field in chrono_fields:
+            if field in self.fields:
+                continue
+            self.fields[field] = []
+        
+        # Add the chrono-tile field. This is a string of numbers that
+        # encode a hierarchy of start and end dates, allowing for 
+        # clustering and searching of similar time spans.
         self.fields['form_use_life_chrono_tile'].append(
             chrono_tile.encode_path_from_bce_ce(
                 date_start, date_stop, '10M-'
             )
         )
+
+        # Below we store numeric time spans, with start and stop
+        # dates.
         self.fields['form_use_life_chrono_earliest'].append(
             date_start
         )
         self.fields['form_use_life_chrono_latest'].append(
             date_stop
         )
+        # Strictly speaking, the point field here is redundant, 
+        # but I want to experiment with it because it encapsulates
+        # start and stop values together (like the chrono_tile).
+        # It's useful to see if Solr can aggregate these for useful
+        # faceting.
+        self.fields['form_use_life_chrono_point'].append(
+            '{},{}'.format(date_start, date_stop)
+        )
+
 
     def _add_predicates_types_chrono(self):
         """Adds chronological information for predicates or types items"""
@@ -1512,6 +1812,7 @@ sd_obj_l.fields
                 continue
             size = float(file_item['dcat:size'])
             if size > self.fields[self.FILE_SIZE_SOLR]:
+                # The biggest filesize gets indexed.
                 self.fields[self.FILE_SIZE_SOLR] = size
     
     def _flag_human_remains_legacy_id_fq(self):
@@ -1767,5 +2068,3 @@ sd_obj_l.fields
         self._add_dublin_core()
         # Make sure the text field is valid for Solr
         self.ensure_text_ok()
-        
-    
