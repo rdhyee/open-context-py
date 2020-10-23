@@ -47,9 +47,6 @@
         file: extra.yml
       ignore_errors: yes
 
-    - name: log secret_key_2
-      debug: msg="{{secret_key_2}}"
-
     - name: log secret_key_4
       debug: msg="{{secret_key_4}}"
 
