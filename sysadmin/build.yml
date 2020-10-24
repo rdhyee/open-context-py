@@ -293,7 +293,7 @@
         chdir: "{{oc_install_dir}}"
       become: yes
       become_user: "{{user_owner}}"
-      when: migrate
+      when: migrate | bool
 
     - name: run migrations (syncdb)
       command: "{{oc_install_dir}}/.venv/bin/python manage.py migrate --run-syncdb"
@@ -301,13 +301,13 @@
         chdir: "{{oc_install_dir}}"
       become: yes
       become_user: "{{user_owner}}"
-      when: migrate
+      when: migrate | bool
 
     - name: create cachetable
       command: "{{oc_install_dir}}/.venv/bin/python manage.py createcachetable"
       args:
         chdir: "{{oc_install_dir}}"
-      when: migrate
+      when: migrate | bool
 
     # - name: copy over static files
     #   unarchive:
@@ -462,13 +462,13 @@
         dest: "{{oc_web_dir}}/crontab_root.txt"
         mode: 0770
       become: yes
-      when: install_root_cron
+      when: install_root_cron | bool
 
     # set up crontab
     - name: create crontab for root
       command: crontab "{{oc_web_dir}}/crontab_root.txt"
       become: yes
-      when: install_root_cron
+      when: install_root_cron | bool
 
 
     # solr configuration
@@ -489,7 +489,7 @@
         owner: solr
         group: solr
         mode: 0770
-      when: not install_solr_data
+      when: not install_solr_data | bool
 
     - name: copy over schema.xml
       copy:
@@ -498,7 +498,7 @@
         owner: solr
         group: solr
         mode: 0770
-      when: not install_solr_data
+      when: not install_solr_data | bool
 
     # download the solr backup 
     - name: download solr backup 
@@ -508,12 +508,12 @@
         mode: 0640
         owner: solr
         group: solr
-      when: install_solr_data
+      when: install_solr_data | bool
 
     - name: create /tmp/solr_backup
       file: path="/tmp/solr_backup" state=directory owner=solr group=solr mode=0770
       become: yes
-      when: install_solr_data
+      when: install_solr_data | bool
 
     # unarchive the solr zip file
     - name: unzip solr zip file
@@ -523,7 +523,7 @@
         remote_src: true
         owner: solr
         group: solr
-      when: install_solr_data
+      when: install_solr_data | bool
 
     # # this didn't work -- time out on some privilege escalation
     # - name: create open-context core 
@@ -539,18 +539,18 @@
       stat: path=/tmp/solr_backup/oc-solr-6/server/solr/open-context
       register: oc_stat
       become: yes
-      when: install_solr_data
+      when: install_solr_data | bool
 
     # TO DO -- parameterize oc-solr-6
     - name: Move solr backup to solr data directory
       command: sudo -u solr bash -c "rm -rf /var/solr/data/open-context/; mv -f /tmp/solr_backup/oc-solr-6/server/solr/open-context /var/solr/data/"
       # when: oc_stat.exists and install_solr_data
-      when: install_solr_data
+      when: install_solr_data | bool
 
     # issue command to reload core
     - name: issue command to reload core
       command: curl "http://localhost:8983/solr/admin/cores?action=RELOAD&core=open-context&&wt=json"
-      when: install_solr_data
+      when: install_solr_data | bool
 
     # then need a reload https://serverfault.com/questions/703031/how-do-i-add-a-solr-core-without-restarting-the-solr-server
     # curl "http://localhost:8983/solr/admin/cores?action=RELOAD&core=open-context&&wt=json"
