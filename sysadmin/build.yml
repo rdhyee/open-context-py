@@ -346,6 +346,12 @@
       args:
         chdir: "{{tempdir_1.path}}/static"
 
+    # sudo -u www-data cp -pr /var/oc-venv/static/oc/* /var/oc-venv/staticroot/oc
+    - name: copy all files under static/oc rep to {{oc_static_root}}
+      shell: "cp -rp {{oc_install_dir}}/static/oc/* {{oc_static_root}}/oc"
+      become: yes
+      become_user: "{{user_owner}}"
+
     - name: Change file ownership for static files
       command: "chown -R {{user_owner}}:{{group_owner}} {{oc_static_root}}"
       changed_when: false
